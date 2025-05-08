@@ -1,0 +1,10 @@
+Orden recomendado para generar un APK limpio
+Cuando quieras generar un APK completamente limpio, te recomiendo seguir estos pasos en orden:
+
+1 Ejecuta Build -> Clean Project
+
+2 Si es necesario, ejecuta file -> Invalidate Caches / Restart
+
+3 Una vez que Android Studio se reinicie, ejecuta Build -> Rebuild Project
+
+4 Finalmente, genera tu APK con Build → Build Bundle(s) / APK(s) → Build APK(s)
