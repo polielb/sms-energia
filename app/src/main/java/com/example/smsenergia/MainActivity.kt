@@ -8,6 +8,8 @@ import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.os.BatteryManager
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.telephony.SmsManager
 import android.widget.Toast
 import androidx.activity.ComponentActivity
@@ -40,9 +42,22 @@ import java.util.Locale
 
 data class ContactoSMS(val nombre: String, val telefono: String)
 
+// Nueva clase para manejar SMS programados
+data class SMSProgramado(
+    val mensaje: String,
+    val tiempoEvento: Long,
+    val tiempoEnvio: Long,
+    val tipo: TipoSMS
+)
+
+enum class TipoSMS {
+    DESCONEXION,
+    CONEXION
+}
+
 class MainActivity : ComponentActivity() {
 
-    // Lista de contactos para SMS (ahora vacía al inicio, se cargará desde SharedPreferences)
+    // Lista de contactos para SMS
     private var contactosSMS = mutableStateListOf<ContactoSMS>()
     private lateinit var sharedPreferences: SharedPreferences
 
@@ -50,13 +65,18 @@ class MainActivity : ComponentActivity() {
     private val DEFAULT_MENSAJE_DESCONEXION = "Corte Energia NOC 1 Edificio Tribunales - San Martin y Saavedra "
     private val DEFAULT_MENSAJE_CONEXION = "Energia restaurada NOC 1 Edificio Tribunales - San Martin y Saavedra "
 
-    // Variables para los mensajes personalizados ....
+    // Variables para los mensajes personalizados
     private var mensajeDesconexion by mutableStateOf("")
     private var mensajeConexion by mutableStateOf("")
 
     private var wasPlugged = false
     private var lastSentTimestamp = 0L
     private val MIN_SEND_INTERVAL = 10000L // 10 segundos mínimo entre envíos
+
+    // Nueva funcionalidad: Cola de SMS programados
+    private val smsProgramados = mutableListOf<SMSProgramado>()
+    private val handler = Handler(Looper.getMainLooper())
+    private val DELAY_ENVIO_SMS = 60000L // 60 segundos de retraso
 
     private val powerConnectionReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
@@ -69,10 +89,6 @@ class MainActivity : ComponentActivity() {
                         plugged == BatteryManager.BATTERY_PLUGGED_WIRELESS
 
                 val currentTime = System.currentTimeMillis()
-                // Verificar que haya pasado suficiente tiempo desde el último envío
-                if (currentTime - lastSentTimestamp < MIN_SEND_INTERVAL) {
-                    return
-                }
 
                 // Verificar que la lista de contactos no esté vacía
                 if (contactosSMS.isEmpty()) {
@@ -82,31 +98,82 @@ class MainActivity : ComponentActivity() {
 
                 if (isPlugged && !wasPlugged) {
                     // El dispositivo se ha conectado a la corriente
-                    if (checkSmsPermission()) {
-                        val mensaje = mensajeConexion + obtenerFechaHora()
-                        sendSmsToAll(mensaje)
-                        lastSentTimestamp = currentTime
-                        Toast.makeText(context, "Conectado: SMS enviado", Toast.LENGTH_SHORT).show()
-                    }
+                    programarEnvioSMS(TipoSMS.CONEXION, currentTime)
                     wasPlugged = true
                 } else if (!isPlugged && wasPlugged) {
                     // El dispositivo se ha desconectado de la corriente
-                    if (checkSmsPermission()) {
-                        val mensaje = mensajeDesconexion + obtenerFechaHora()
-                        sendSmsToAll(mensaje)
-                        lastSentTimestamp = currentTime
-                        Toast.makeText(context, "Desconectado: SMS enviado", Toast.LENGTH_SHORT).show()
-                    }
+                    programarEnvioSMS(TipoSMS.DESCONEXION, currentTime)
                     wasPlugged = false
                 }
             }
         }
     }
 
-    // Función simple para obtener fecha y hora actual formateada
-    private fun obtenerFechaHora(): String {
-        val formato = SimpleDateFormat("dd/MM/yy HH:mm", Locale("es", "ES"))
-        return formato.format(Date())
+    // Nueva función para programar el envío de SMS con retraso
+    private fun programarEnvioSMS(tipo: TipoSMS, tiempoEvento: Long) {
+        val tiempoEnvio = tiempoEvento + DELAY_ENVIO_SMS
+        val mensaje = when (tipo) {
+            TipoSMS.DESCONEXION -> mensajeDesconexion + obtenerFechaHora(tiempoEvento)
+            TipoSMS.CONEXION -> mensajeConexion + obtenerFechaHora(tiempoEvento)
+        }
+
+        val smsPrograma = SMSProgramado(mensaje, tiempoEvento, tiempoEnvio, tipo)
+
+        // Añadir a la cola de SMS programados
+        synchronized(smsProgramados) {
+            smsProgramados.add(smsPrograma)
+        }
+
+        // Programar el envío
+        handler.postDelayed({
+            enviarSMSProgramado(smsPrograma)
+        }, DELAY_ENVIO_SMS)
+
+        // Mostrar notificación de que el SMS fue programado
+        val tipoTexto = if (tipo == TipoSMS.DESCONEXION) "desconexión" else "conexión"
+        val fechaEnvio = obtenerFechaHora(tiempoEnvio)
+        Toast.makeText(this,
+            "SMS de $tipoTexto programado para: $fechaEnvio",
+            Toast.LENGTH_LONG).show()
+    }
+
+    // Función para enviar SMS programado
+    private fun enviarSMSProgramado(smsPrograma: SMSProgramado) {
+        synchronized(smsProgramados) {
+            if (smsProgramados.contains(smsPrograma)) {
+                if (checkSmsPermission()) {
+                    sendSmsToAll(smsPrograma.mensaje)
+                    val tipoTexto = if (smsPrograma.tipo == TipoSMS.DESCONEXION) "desconexión" else "conexión"
+                    Toast.makeText(this, "SMS de $tipoTexto enviado", Toast.LENGTH_SHORT).show()
+                }
+                smsProgramados.remove(smsPrograma)
+            }
+        }
+    }
+
+    // Función para obtener fecha y hora actual o de un timestamp específico
+    private fun obtenerFechaHora(timestamp: Long = System.currentTimeMillis()): String {
+        val formato = SimpleDateFormat("dd/MM/yy HH:mm:ss", Locale("es", "ES"))
+        return formato.format(Date(timestamp))
+    }
+
+    // Función para mostrar la cola de SMS programados
+    fun mostrarColaSMS(): String {
+        synchronized(smsProgramados) {
+            if (smsProgramados.isEmpty()) {
+                return "No hay SMS programados"
+            }
+
+            val sb = StringBuilder()
+            sb.append("SMS programados (${smsProgramados.size}):\n")
+            smsProgramados.forEachIndexed { index, sms ->
+                val tipo = if (sms.tipo == TipoSMS.DESCONEXION) "Desconexión" else "Conexión"
+                val fechaEvento = obtenerFechaHora(sms.tiempoEvento)
+                val fechaEnvio = obtenerFechaHora(sms.tiempoEnvio)
+                sb.append("${index + 1}. $tipo - Evento: $fechaEvento - Envío: $fechaEnvio\n")
+            }
+            return sb.toString()
+        }
     }
 
     // Solicitar permisos con API moderna
@@ -167,6 +234,10 @@ class MainActivity : ComponentActivity() {
                                 Toast.makeText(this, "SMS de prueba enviado", Toast.LENGTH_SHORT).show()
                             }
                         },
+                        onShowQueueClick = {
+                            val colaInfo = mostrarColaSMS()
+                            Toast.makeText(this, colaInfo, Toast.LENGTH_LONG).show()
+                        },
                         onAddContact = { nombre, telefono ->
                             if (nombre.isNotBlank() && telefono.isNotBlank()) {
                                 val nuevoContacto = ContactoSMS(nombre, telefono)
@@ -218,7 +289,6 @@ class MainActivity : ComponentActivity() {
     private fun checkSmsPermission(): Boolean {
         if (ContextCompat.checkSelfPermission(this, android.Manifest.permission.SEND_SMS)
             != PackageManager.PERMISSION_GRANTED) {
-            // Usar el nuevo método de solicitud de permisos
             requestPermissionLauncher.launch(android.Manifest.permission.SEND_SMS)
             return false
         }
@@ -227,13 +297,11 @@ class MainActivity : ComponentActivity() {
 
     private fun sendSmsToAll(message: String) {
         try {
-            // Verificar que la lista de contactos no esté vacía
             if (contactosSMS.isEmpty()) {
                 Toast.makeText(this, "No hay contactos para enviar SMS", Toast.LENGTH_SHORT).show()
                 return
             }
 
-            // Crear una nueva instancia de SmsManager cada vez (evita reutilización)
             val smsManager = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
                 this.getSystemService(SmsManager::class.java)
             } else {
@@ -241,15 +309,12 @@ class MainActivity : ComponentActivity() {
                 SmsManager.getDefault()
             }
 
-            // Enviar mensajes uno por uno con un pequeño retraso entre cada uno
             Thread {
                 for (contacto in contactosSMS) {
                     try {
                         smsManager.sendTextMessage(contacto.telefono, null, message, null, null)
-                        // Pequeña pausa entre envíos
                         Thread.sleep(500)
                     } catch (e: Exception) {
-                        // Manejar errores específicos de cada número
                         runOnUiThread {
                             Toast.makeText(this, "Error al enviar SMS a ${contacto.nombre} (${contacto.telefono}): ${e.message}",
                                 Toast.LENGTH_LONG).show()
@@ -264,8 +329,13 @@ class MainActivity : ComponentActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
-        // Desregistrar el BroadcastReceiver cuando la actividad se destruye
         unregisterReceiver(powerConnectionReceiver)
+
+        // Cancelar todos los SMS programados pendientes
+        synchronized(smsProgramados) {
+            smsProgramados.clear()
+        }
+        handler.removeCallbacksAndMessages(null)
     }
 }
 
@@ -277,6 +347,7 @@ fun MainScreen(
     onMensajeDesconexionChange: (String) -> Unit,
     onMensajeConexionChange: (String) -> Unit,
     onTestButtonClick: () -> Unit,
+    onShowQueueClick: () -> Unit,
     onAddContact: (nombre: String, telefono: String) -> Boolean,
     onDeleteContact: (ContactoSMS) -> Unit
 ) {
@@ -288,7 +359,7 @@ fun MainScreen(
             .fillMaxSize()
             .padding(16.dp),
     ) {
-        // Título y botón de prueba
+        // Título y botones
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -299,9 +370,33 @@ fun MainScreen(
                 style = MaterialTheme.typography.headlineSmall
             )
 
-            Button(onClick = onTestButtonClick) {
-                Text("Enviar SMS de prueba")
+            Column {
+                Button(onClick = onTestButtonClick) {
+                    Text("SMS Prueba")
+                }
+                Spacer(modifier = Modifier.height(4.dp))
+                Button(onClick = onShowQueueClick) {
+                    Text("Ver Cola SMS")
+                }
             }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // Información del retraso
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 4.dp),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.primaryContainer
+            )
+        ) {
+            Text(
+                text = "⏱️ Los SMS se envían con 60 segundos de retraso para evitar interrupciones frecuentes",
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.padding(12.dp)
+            )
         }
 
         Spacer(modifier = Modifier.height(16.dp))
@@ -323,7 +418,6 @@ fun MainScreen(
             modifier = Modifier.padding(bottom = 8.dp)
         )
 
-        // Campo para nombre
         OutlinedTextField(
             value = nombre,
             onValueChange = { nombre = it },
@@ -333,7 +427,6 @@ fun MainScreen(
 
         Spacer(modifier = Modifier.height(8.dp))
 
-        // Campo para teléfono
         OutlinedTextField(
             value = telefono,
             onValueChange = { telefono = it },
@@ -344,7 +437,6 @@ fun MainScreen(
 
         Spacer(modifier = Modifier.height(8.dp))
 
-        // Botón para agregar contacto
         Button(
             onClick = {
                 val success = onAddContact(nombre, telefono)
