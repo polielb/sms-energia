@@ -1,5 +1,3 @@
-funcionando-sms-con-retraso y ventana deslizable 
-
 Orden recomendado para generar un APK limpio
 Cuando quieras generar un APK completamente limpio, te recomiendo seguir estos pasos en orden:
 

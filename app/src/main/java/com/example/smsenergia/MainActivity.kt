@@ -354,127 +354,183 @@ fun MainScreen(
     var nombre by remember { mutableStateOf("") }
     var telefono by remember { mutableStateOf("") }
 
-    Column(
+    LazyColumn(
         modifier = Modifier
             .fillMaxSize()
             .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         // Título y botones
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = "Detector de Carga",
-                style = MaterialTheme.typography.headlineSmall
-            )
+        item {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Detector de Carga",
+                    style = MaterialTheme.typography.headlineSmall
+                )
 
-            Column {
-                Button(onClick = onTestButtonClick) {
-                    Text("SMS Prueba")
-                }
-                Spacer(modifier = Modifier.height(4.dp))
-                Button(onClick = onShowQueueClick) {
-                    Text("Ver Cola SMS")
+                Column {
+                    Button(onClick = onTestButtonClick) {
+                        Text("SMS Prueba")
+                    }
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Button(onClick = onShowQueueClick) {
+                        Text("Ver Cola SMS")
+                    }
                 }
             }
         }
 
-        Spacer(modifier = Modifier.height(16.dp))
-
         // Información del retraso
-        Card(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(vertical = 4.dp),
-            colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.primaryContainer
-            )
-        ) {
-            Text(
-                text = "⏱️ Los SMS se envían con 60 segundos de retraso para evitar interrupciones frecuentes",
-                style = MaterialTheme.typography.bodyMedium,
-                modifier = Modifier.padding(12.dp)
-            )
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.primaryContainer
+                )
+            ) {
+                Text(
+                    text = "⏱️ Los SMS se envían con 60 segundos de retraso para evitar interrupciones frecuentes",
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.padding(12.dp)
+                )
+            }
         }
-
-        Spacer(modifier = Modifier.height(16.dp))
 
         // Sección de mensajes personalizados
-        MensajesPersonalizados(
-            mensajeDesconexion = mensajeDesconexion,
-            mensajeConexion = mensajeConexion,
-            onMensajeDesconexionChange = onMensajeDesconexionChange,
-            onMensajeConexionChange = onMensajeConexionChange
-        )
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        // Sección para agregar contactos
-        Text(
-            text = "Agregar Contacto",
-            style = MaterialTheme.typography.titleMedium,
-            modifier = Modifier.padding(bottom = 8.dp)
-        )
-
-        OutlinedTextField(
-            value = nombre,
-            onValueChange = { nombre = it },
-            label = { Text("Nombre") },
-            modifier = Modifier.fillMaxWidth()
-        )
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        OutlinedTextField(
-            value = telefono,
-            onValueChange = { telefono = it },
-            label = { Text("Teléfono") },
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
-            modifier = Modifier.fillMaxWidth()
-        )
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        Button(
-            onClick = {
-                val success = onAddContact(nombre, telefono)
-                if (success) {
-                    nombre = ""
-                    telefono = ""
-                }
-            },
-            modifier = Modifier.align(Alignment.End)
-        ) {
-            Text("Agregar Contacto")
+        item {
+            MensajesPersonalizados(
+                mensajeDesconexion = mensajeDesconexion,
+                mensajeConexion = mensajeConexion,
+                onMensajeDesconexionChange = onMensajeDesconexionChange,
+                onMensajeConexionChange = onMensajeConexionChange
+            )
         }
 
-        Spacer(modifier = Modifier.height(16.dp))
-
-        // Lista de contactos
-        Text(
-            text = "Lista de Contactos",
-            style = MaterialTheme.typography.titleMedium,
-            modifier = Modifier.padding(bottom = 8.dp)
-        )
-
-        if (contactos.isEmpty()) {
-            Text(
-                text = "No hay contactos registrados",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.error,
-                modifier = Modifier.padding(vertical = 16.dp)
+        // Sección para agregar contactos (ahora colapsible)
+        item {
+            AgregarContactoSection(
+                nombre = nombre,
+                telefono = telefono,
+                onNombreChange = { nombre = it },
+                onTelefonoChange = { telefono = it },
+                onAddContact = { nombreInput, telefonoInput ->
+                    val success = onAddContact(nombreInput, telefonoInput)
+                    if (success) {
+                        nombre = ""
+                        telefono = ""
+                    }
+                    success
+                }
             )
-        } else {
-            LazyColumn(
-                modifier = Modifier.weight(1f)
-            ) {
-                items(contactos) { contacto ->
-                    ContactoItem(
-                        contacto = contacto,
-                        onDelete = { onDeleteContact(contacto) }
+        }
+
+        // Lista de contactos - Título
+        item {
+            Text(
+                text = "Lista de Contactos (${contactos.size})",
+                style = MaterialTheme.typography.titleMedium
+            )
+        }
+
+        // Lista de contactos - Contenido
+        if (contactos.isEmpty()) {
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.errorContainer
                     )
+                ) {
+                    Text(
+                        text = "📱 No hay contactos registrados\nAgrega contactos para recibir notificaciones SMS",
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.padding(16.dp)
+                    )
+                }
+            }
+        } else {
+            items(contactos) { contacto ->
+                ContactoItem(
+                    contacto = contacto,
+                    onDelete = { onDeleteContact(contacto) }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun AgregarContactoSection(
+    nombre: String,
+    telefono: String,
+    onNombreChange: (String) -> Unit,
+    onTelefonoChange: (String) -> Unit,
+    onAddContact: (String, String) -> Boolean
+) {
+    var expandido by remember { mutableStateOf(false) }
+
+    Card(
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(
+            modifier = Modifier.padding(8.dp)
+        ) {
+            // Header clickeable
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { expandido = !expandido },
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Agregar Contacto",
+                    style = MaterialTheme.typography.titleMedium
+                )
+
+                Icon(
+                    imageVector = if (expandido) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                    contentDescription = if (expandido) "Contraer" else "Expandir"
+                )
+            }
+
+            // Contenido expandible
+            if (expandido) {
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // Campo para nombre
+                OutlinedTextField(
+                    value = nombre,
+                    onValueChange = onNombreChange,
+                    label = { Text("Nombre") },
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // Campo para teléfono
+                OutlinedTextField(
+                    value = telefono,
+                    onValueChange = onTelefonoChange,
+                    label = { Text("Teléfono") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // Botón para agregar contacto
+                Button(
+                    onClick = {
+                        onAddContact(nombre, telefono)
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Agregar Contacto")
                 }
             }
         }
